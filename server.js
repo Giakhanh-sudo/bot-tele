@@ -150,7 +150,7 @@ function handleCommand(msg) {
             isMaintenanceMode = true;
             const customMsg = args.slice(2).join(' ');
             if (customMsg) maintenanceMsg = customMsg;
-            return sendMessage(chatId, `🛠️ *ĐÃ BẬT CHẾ ĐỘ BẢO TRÌ TỪ XA!*\n📢 Thông báo: "${maintenanceMsg}"\n🔒 *Tất cả Tool của người dùng khi mở lên đều sẽ bị khóa ngay lập tức.*`);
+            return sendMessage(chatId, `🛠️ *ĐÃ BẬT CHẾ ĐỘ BẢO TRÌ TỪ XA!*\n📢 Thông báo: "${maintenanceMsg}"\n🔒 *Tất cả Tool của người dùng sẽ bị khóa ngay lập tức.*`);
         } else if (action === 'off') {
             isMaintenanceMode = false;
             return sendMessage(chatId, "🟢 *ĐÃ TẮT BẢO TRÌ!* Tool đã cho phép người dùng đăng nhập lại bình thường.");
@@ -171,6 +171,15 @@ app.get('/api/status', (req, res) => {
 
 // --- API XÁC THỰC KEY TÍCH HỢP HWID & TRẢ VỀ THỜI HẠN ---
 app.get('/api/verify', (req, res) => {
+    // 🛑 CHẶN NGAY TẠI API NẾU ĐANG BẢO TRÌ
+    if (isMaintenanceMode) {
+        return res.json({ 
+            success: false, 
+            isMaintenance: true, 
+            message: maintenanceMsg 
+        });
+    }
+
     const key = req.query.key;
     const deviceId = req.query.deviceId;
 
