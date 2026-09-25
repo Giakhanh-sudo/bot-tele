@@ -1,5 +1,5 @@
 {
-  "name": "bot-telegram-key",
+  "name": "bot-tele-server",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "node-telegram-bot-api": "^0.64.0"
   }
 }
