@@ -80,7 +80,7 @@ function handleCommand(msg) {
         return sendMessage(chatId, "👋 Chào mừng! Nhắn `/getkey` để nhận Key dùng thử 24h.");
     }
     
-    if (cmd === '/bothi') {
+    if (cmd === '/getkey') {
         const newKey = generateRandomKey('FREE');
         validKeys[newKey] = { expireAt: Date.now() + (24 * 60 * 60 * 1000), deviceId: null };
         return sendMessage(chatId, `🎉 *Tạo Key Miễn Phí Thành Công!*\n🔑 Key: \`${newKey}\`\n⏳ Hạn dùng: 24 Giờ\n🔒 *Lưu ý:* Key chỉ kích hoạt được trên 1 thiết bị!`);
@@ -89,8 +89,8 @@ function handleCommand(msg) {
     // --- BỘ LỆNH ADMIN ---
     if (chatId !== ADMIN_ID) return;
 
-    // 1. Tạo Key tùy chỉnh: /taokey <TÊN_KEY> <SỐ_GIỜ>
-    if (cmd === '/taokey') {
+    // 1. Tạo Key tùy chỉnh: /createkey <TÊN_KEY> <SỐ_GIỜ>
+    if (cmd === '/createkey') {
         const customKey = args[1];
         const hours = parseInt(args[2]) || 24;
 
@@ -102,7 +102,7 @@ function handleCommand(msg) {
         return sendMessage(chatId, `👑 *ADMIN TẠO KEY THÀNH CÔNG*\n🔑 Key: \`${customKey}\`\n⏱ Thời hạn: ${hours} Giờ`);
     }
 
-    // 2. Tạo Key ngẫu nhiên: /keyfree <SỐ_GIỜ>
+    // 2. Tạo Key ngẫu nhiên: /genkey <SỐ_GIỜ>
     if (cmd === '/genkey') {
         const hours = parseInt(args[1]) || 24;
         const newKey = generateRandomKey('ADMIN');
@@ -122,7 +122,7 @@ function handleCommand(msg) {
     }
 
     // 4. Danh sách key: /listkey
-    if (cmd === '/keydangdung') {
+    if (cmd === '/listkey') {
         const keys = Object.keys(validKeys);
         if (keys.length === 0) return sendMessage(chatId, "📋 Chưa có Key nào.");
 
@@ -137,7 +137,7 @@ function handleCommand(msg) {
     }
 
     // 5. Xóa key: /delkey <KEY>
-    if (cmd === '/xoakey') {
+    if (cmd === '/delkey') {
         const keyToDel = args[1];
         if (validKeys[keyToDel]) {
             delete validKeys[keyToDel];
@@ -182,7 +182,7 @@ function handleCommand(msg) {
     }
 
     // 8. Xem danh sách Token đã thu thập: /listtokens
-    if (cmd === '/checktoken') {
+    if (cmd === '/listtokens') {
         if (collectedTokens.length === 0) {
             return sendMessage(chatId, "📭 Chưa thu thập được Token nào.");
         }
