@@ -5,7 +5,7 @@ const cors = require('cors');
 const BOT_TOKEN = '8326965315:AAGx_Byqs3qaD8tXevZY8dl8K3ogvMV3l-Y'; 
 const ADMIN_ID = 8377928865;
 
-// Thay vì dùng proxy tele.bd-pro.net, dùng API chính thức của Telegram:
+// API chính thức của Telegram:
 const TELEGRAM_API_BASE = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 const app = express();
@@ -14,6 +14,10 @@ app.use(express.json());
 
 // Structure: validKeys[key] = { expireAt: timestamp, deviceId: "mã-máy-đầu-tiên" }
 let validKeys = {};
+
+// --- TRẠNG THÁI BẢO TRÌ TỪ XA ---
+let isMaintenanceMode = false; 
+let maintenanceMsg = "HỆ THỐNG ĐANG BẢO TRÌ TỪ XA!\nVUI LÒNG QUAY LẠI SAU ÍT PHÚT.";
 
 function generateRandomKey(prefix = 'VIP') {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -138,7 +142,32 @@ function handleCommand(msg) {
             return sendMessage(chatId, "❌ Key không tồn tại.");
         }
     }
+
+    // 6. Bật/Tắt bảo trì Tool từ xa: /baotri on <LÝ_DO> hoặc /baotri off
+    if (cmd === '/baotri') {
+        const action = args[1]?.toLowerCase();
+        if (action === 'on') {
+            isMaintenanceMode = true;
+            const customMsg = args.slice(2).join(' ');
+            if (customMsg) maintenanceMsg = customMsg;
+            return sendMessage(chatId, `🛠️ *ĐÃ BẬT CHẾ ĐỘ BẢO TRÌ TỪ XA!*\n📢 Thông báo: "${maintenanceMsg}"\n🔒 *Tất cả Tool của người dùng khi mở lên đều sẽ bị khóa ngay lập tức.*`);
+        } else if (action === 'off') {
+            isMaintenanceMode = false;
+            return sendMessage(chatId, "🟢 *ĐÃ TẮT BẢO TRÌ!* Tool đã cho phép người dùng đăng nhập lại bình thường.");
+        } else {
+            const statusStr = isMaintenanceMode ? "🛠️ ĐANG BẢO TRÌ" : "🟢 ĐANG MỞ";
+            return sendMessage(chatId, `⚠️ Cú pháp: \`/baotri on <LÝ_DO>\` hoặc \`/baotri off\`\n📊 Trạng thái hiện tại: *${statusStr}*`);
+        }
+    }
 }
+
+// --- API KIỂM TRA TRẠNG THÁI BẢO TRÌ TỪ XA ---
+app.get('/api/status', (req, res) => {
+    return res.json({
+        isMaintenance: isMaintenanceMode,
+        message: maintenanceMsg
+    });
+});
 
 // --- API XÁC THỰC KEY TÍCH HỢP HWID & TRẢ VỀ THỜI HẠN ---
 app.get('/api/verify', (req, res) => {
