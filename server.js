@@ -11,10 +11,10 @@ const PORT = process.env.PORT || 3000;
 // CẤU HÌNH BOT TELEGRAM & ADMIN
 // ==========================================
 // Nhập Token Telegram Bot của bạn (hoặc cài biến môi trường BOT_TOKEN trên Render)
-const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_TELEGRAM_BOT_TOKEN_HERE';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8824683894:AAFup6ikP7V1nvu5QJhnDcmD9A3RyQT8_rs';
 
 // Nhập ID Telegram cá nhân của bạn (Admin) vào danh sách này
-const ADMIN_IDS = [123456789]; 
+const ADMIN_IDS = [8377928865]; 
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
