@@ -13,7 +13,7 @@ app.use(cors({
 app.use(express.json());
 
 // CẤU HÌNH BÀI VIẾT TELEGRAM
-const TELEGRAM_TOKEN = "8326965315:AAGx_Byqs3qaD8tXevZY8dl8K3ogvMV3l-Y";
+const TELEGRAM_TOKEN = "8824683894:AAFup6ikP7V1nvu5QJhnDcmD9A3RyQT8_rs";
 const ADMIN_ID = 8377928865;
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
