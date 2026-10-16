@@ -31,7 +31,7 @@ keep_alive()
 # 2. CẤU HÌNH BOT & PHÂN QUYỀN OWNER
 # =========================================================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN") or "MTU1MjU4NTIxNTU4NTgxNjU3Ng.GNvR3u.8ka0y5ocdjsIMx1dkl0RyJttovF5Hyit4ywNjQ"
-OWNER_ID = 1475126394345361609  # ID Chủ sở hữu duy nhất được dùng lệnh
+OWNER_ID = 1475126394345361609 # ID Chủ sở hữu duy nhất được dùng lệnh
 
 intents = discord.Intents.default()
 intents.message_content = True  
